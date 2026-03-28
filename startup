@@ -1,0 +1,13 @@
+Run these every time you open the project:
+
+Open Terminal 1 (Backend):
+npm start
+
+Open Terminal 2 (Frontend):
+npx --yes serve Frontend -l 5500
+
+Then open:
+
+http://127.0.0.1:5500
+
+
