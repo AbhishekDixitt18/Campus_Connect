@@ -1,0 +1,42 @@
+<svg width="600" height="200" viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="connectGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#06B6D4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1" />
+    </linearGradient>
+
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g transform="translate(70, 100)">
+    <circle cx="0" cy="0" r="45" fill="none" stroke="#1E3A8A" stroke-width="10"
+            stroke-dasharray="220 70" stroke-linecap="round" transform="rotate(135)"/>
+
+    <circle cx="0" cy="0" r="32" fill="none" stroke="url(#connectGradient)" stroke-width="8"
+            stroke-dasharray="140 100" stroke-linecap="round" transform="rotate(-45)"/>
+
+    <circle cx="0" cy="-10" r="5" fill="white" filter="url(#glow)"/>
+    <circle cx="0" cy="-10" r="3" fill="#8B5CF6"/>
+
+    <rect x="25" y="25" width="4" height="4" fill="#06B6D4" opacity="0.8"/>
+    <rect x="32" y="18" width="3" height="3" fill="#06B6D4" opacity="0.6"/>
+  </g>
+
+  <g transform="translate(140, 110)">
+        <text x="0" y="0" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-weight="700" font-size="42" fill="#E8F2FF">
+      CAMPUS
+    </text>
+
+    <text x="158" y="0" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+          font-weight="300" font-size="42" fill="url(#connectGradient)">
+      CONNECT
+    </text>
+  </g>
+</svg>
