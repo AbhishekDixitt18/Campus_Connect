@@ -1,12 +1,12 @@
-const { useState } = React;
+const { useEffect, useMemo, useState } = React;
 
 const API_HOST = window.location.hostname || "127.0.0.1";
 const API_BASE = `http://${API_HOST}:4000/api`;
-const REQUIRE_EMAIL_OTP = false;
 
 function SignupPage() {
-  const totalSteps = REQUIRE_EMAIL_OTP ? 5 : 4;
-  const stepTitles = REQUIRE_EMAIL_OTP
+  const [requireEmailOtp, setRequireEmailOtp] = useState(true);
+  const totalSteps = requireEmailOtp ? 5 : 4;
+  const stepTitles = requireEmailOtp
     ? [
         "Choose your role",
         "Academic details",
@@ -20,7 +20,7 @@ function SignupPage() {
         "Email and password",
         "Choose username"
       ];
-  const usernameStep = REQUIRE_EMAIL_OTP ? 5 : 4;
+  const usernameStep = requireEmailOtp ? 5 : 4;
 
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
@@ -41,8 +41,46 @@ function SignupPage() {
   const [isCodeSent, setIsCodeSent] = useState(false);
   const [signupProofToken, setSignupProofToken] = useState("");
   const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
+  const [otpCooldown, setOtpCooldown] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "idle" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSignupConfig() {
+      try {
+        const response = await fetch(`${API_BASE}/config`);
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        if (!cancelled && typeof data.requireEmailOtp === "boolean") {
+          setRequireEmailOtp(data.requireEmailOtp);
+        }
+      } catch (_error) {
+        // Keep OTP enabled by default if config fetch fails.
+      }
+    }
+
+    loadSignupConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (otpCooldown <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setOtpCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [otpCooldown]);
 
   const departments = [
     "Computer Science & Engineering",
@@ -177,7 +215,7 @@ function SignupPage() {
       return "";
     }
 
-    if (REQUIRE_EMAIL_OTP && currentStep === 4) {
+    if (requireEmailOtp && currentStep === 4) {
       if (!isCodeSent) {
         return "Please send the verification code to your email first.";
       }
@@ -243,6 +281,7 @@ function SignupPage() {
       setIsEmailVerified(false);
       setSignupProofToken("");
       setOtpDigits(["", "", "", "", "", ""]);
+      setOtpCooldown(30);
       setSuccess("Verification code sent to your email.");
     } catch (_error) {
       setError("Network error while sending verification code.");
@@ -309,7 +348,7 @@ function SignupPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          signupProofToken: REQUIRE_EMAIL_OTP ? signupProofToken : null,
+          signupProofToken: requireEmailOtp ? signupProofToken : null,
           accountType: formData.accountType,
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
@@ -363,6 +402,29 @@ function SignupPage() {
       ? "text-[#66f0cb]"
       : "text-[#9fb4dd]";
 
+  const passwordStrength = useMemo(() => {
+    const password = String(formData.password || "");
+    const checks = {
+      length: password.length >= 8,
+      upper: /[A-Z]/.test(password),
+      lower: /[a-z]/.test(password),
+      number: /\d/.test(password),
+      symbol: /[^A-Za-z0-9]/.test(password)
+    };
+    const score = Object.values(checks).filter(Boolean).length;
+
+    let label = "Weak";
+    if (score >= 4) {
+      label = "Strong";
+    } else if (score >= 3) {
+      label = "Good";
+    } else if (score >= 2) {
+      label = "Fair";
+    }
+
+    return { checks, score, label };
+  }, [formData.password]);
+
   return (
     <div className="min-h-screen bg-[linear-gradient(140deg,#fbfdff,#e9f3ff)] p-3 md:p-6">
       <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-[1200px] overflow-hidden rounded-[2rem] border border-[#cfdeeb] shadow-[0_22px_52px_rgba(26,49,74,0.12)] lg:grid-cols-2">
@@ -395,6 +457,11 @@ function SignupPage() {
             <p className="mt-4 max-w-[50ch] text-sm text-[#d6e6ff] md:text-base">
               Discover events, register instantly, and stay updated with one unified platform.
             </p>
+            <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#d6fff7]">
+              <span className="rounded-full border border-[#84e9d87a] bg-[#1f7f735c] px-3 py-1">Verified Campus IDs</span>
+              <span className="rounded-full border border-[#8ac4ff73] bg-[#24538757] px-3 py-1">Trusted Signups</span>
+              <span className="rounded-full border border-[#93f1e17a] bg-[#1f6a7452] px-3 py-1">Fast Onboarding</span>
+            </div>
           </div>
         </section>
 
@@ -578,6 +645,26 @@ function SignupPage() {
                   />
                 </label>
 
+                <div className="mt-3 rounded-xl border border-[#d2dfeb] bg-[#f7fbff] p-3">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-[#4b6380]">Password strength</span>
+                    <span className="text-[#1f4d78]">{passwordStrength.label}</span>
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#d9e8f5]">
+                    <div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,#0ea596,#2b6ee8)] transition-all duration-300"
+                      style={{ width: `${(passwordStrength.score / 5) * 100}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-[#5f748a]">
+                    <span>{passwordStrength.checks.length ? "OK" : "-"} 8+ chars</span>
+                    <span>{passwordStrength.checks.upper ? "OK" : "-"} uppercase</span>
+                    <span>{passwordStrength.checks.lower ? "OK" : "-"} lowercase</span>
+                    <span>{passwordStrength.checks.number ? "OK" : "-"} number</span>
+                    <span>{passwordStrength.checks.symbol ? "OK" : "-"} symbol</span>
+                  </div>
+                </div>
+
                 <label className="mt-3 block text-sm text-[#24344a]">
                   Confirm password
                   <input
@@ -603,7 +690,7 @@ function SignupPage() {
               </div>
             )}
 
-            {REQUIRE_EMAIL_OTP && step === 4 && (
+            {requireEmailOtp && step === 4 && (
               <div className="space-y-4">
                 <p className="text-sm text-[#50647d]">
                   Verify your email <span className="font-semibold text-[#1a2a3d]">{formData.email || "(not set)"}</span>
@@ -613,10 +700,16 @@ function SignupPage() {
                   <button
                     type="button"
                     onClick={sendVerificationCode}
-                    disabled={isBusy}
+                    disabled={isBusy || otpCooldown > 0}
                     className="rounded-xl border border-[#bee7df] bg-[#e8f7f4] px-4 py-3 text-sm font-semibold text-[#0e8f84] transition hover:bg-[#d4ede8] sm:min-w-[190px]"
                   >
-                    {isBusy ? "Sending..." : isCodeSent ? "Resend Code" : "Send Verification Code"}
+                    {isBusy
+                      ? "Sending..."
+                      : otpCooldown > 0
+                      ? `Resend in ${otpCooldown}s`
+                      : isCodeSent
+                      ? "Resend Code"
+                      : "Send Verification Code"}
                   </button>
                 </div>
 
@@ -640,10 +733,10 @@ function SignupPage() {
                 <button
                   type="button"
                   onClick={verifyCode}
-                  disabled={isBusy}
-                  className="rounded-xl bg-[linear-gradient(135deg,#169f91,#36cfc0)] px-4 py-3 font-semibold text-[#ffffff] shadow-[0_8px_16px_rgba(22,159,145,0.2)] transition hover:-translate-y-0.5 hover:brightness-105 sm:min-w-[180px]"
+                  disabled={isBusy || isEmailVerified}
+                  className="rounded-xl bg-[linear-gradient(135deg,#169f91,#36cfc0)] px-4 py-3 font-semibold text-[#ffffff] shadow-[0_8px_16px_rgba(22,159,145,0.2)] transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55 sm:min-w-[180px]"
                 >
-                  {isBusy ? "Verifying..." : "Verify Email"}
+                  {isEmailVerified ? "Verified" : isBusy ? "Verifying..." : "Verify Email"}
                 </button>
 
                 <p className={`text-sm ${isEmailVerified ? "text-[#16a084]" : "text-[#5f748a]"}`}>

@@ -26,6 +26,7 @@ const {
 } = process.env;
 
 const emailOtpEnabled = String(REQUIRE_EMAIL_OTP).toLowerCase() === "true";
+const canSendEmailOtp = Boolean(RESEND_API_KEY && RESEND_FROM_EMAIL);
 
 if (!JWT_SECRET || !OTP_PEPPER) {
   console.error("Missing required env vars. Check backend/.env.example");
@@ -37,12 +38,11 @@ if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
   process.exit(1);
 }
 
-if (emailOtpEnabled && (!RESEND_API_KEY || !RESEND_FROM_EMAIL)) {
-  console.error("REQUIRE_EMAIL_OTP=true requires RESEND_API_KEY and RESEND_FROM_EMAIL.");
-  process.exit(1);
+if (emailOtpEnabled && !canSendEmailOtp) {
+  console.warn("Email OTP is enabled, but Resend is not fully configured. Falling back to console OTP delivery.");
 }
 
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+const resend = canSendEmailOtp ? new Resend(RESEND_API_KEY) : null;
 const app = express();
 const dbPath = path.join(__dirname, "auth.db");
 const db = new sqlite3.Database(dbPath);
@@ -286,9 +286,16 @@ async function initializeDatabase() {
       email TEXT NOT NULL UNIQUE,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
+      email_verified INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     )
   `);
+
+  const userColumns = await all(`PRAGMA table_info(users)`);
+  const hasEmailVerifiedColumn = userColumns.some((column) => column.name === "email_verified");
+  if (!hasEmailVerifiedColumn) {
+    await run(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
+  }
 
   await run(`
     CREATE TABLE IF NOT EXISTS events (
@@ -344,6 +351,13 @@ async function initializeDatabase() {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "campus-connect-auth-api" });
+});
+
+app.get("/api/config", (_req, res) => {
+  res.json({
+    requireEmailOtp: emailOtpEnabled,
+    otpExpiryMinutes: Number(OTP_EXPIRY_MINUTES) || 10
+  });
 });
 
 app.get("/api/debug/events", async (_req, res) => {
@@ -870,34 +884,49 @@ app.post("/api/auth/otp/send", otpLimiter, async (req, res) => {
     );
 
     if (resend && RESEND_FROM_EMAIL) {
-      const sendResult = await resend.emails.send({
-        from: RESEND_FROM_EMAIL,
-        to: email,
-        subject: `${RESEND_AUDIENCE_NAME} email verification code`,
-        html: `
-          <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">
-            <h2 style="margin-bottom:8px">Verify Your Email</h2>
-            <p>Your one-time verification code is:</p>
-            <p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:12px 0">${code}</p>
-            <p>This code expires in ${OTP_EXPIRY_MINUTES} minutes.</p>
-            <p>If you did not request this, you can ignore this email.</p>
-          </div>
-        `
-      });
+      try {
+        const sendResult = await resend.emails.send({
+          from: RESEND_FROM_EMAIL,
+          to: email,
+          subject: `${RESEND_AUDIENCE_NAME} email verification code`,
+          html: `
+            <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">
+              <h2 style="margin-bottom:8px">Verify Your Email</h2>
+              <p>Your one-time verification code is:</p>
+              <p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:12px 0">${code}</p>
+              <p>This code expires in ${OTP_EXPIRY_MINUTES} minutes.</p>
+              <p>If you did not request this, you can ignore this email.</p>
+            </div>
+          `
+        });
 
-      if (sendResult && sendResult.error) {
-        console.error("Resend provider error:", sendResult.error);
-        return jsonError(
-          res,
-          502,
-          sendResult.error.message || "Email provider rejected the message."
-        );
+        if (sendResult && sendResult.error) {
+          if (emailOtpEnabled) {
+            return jsonError(
+              res,
+              502,
+              sendResult.error.message || "Email provider rejected the message."
+            );
+          }
+          console.warn("Resend provider error, falling back to console OTP delivery:", sendResult.error);
+        } else {
+          return res.json({
+            message: "Verification code sent.",
+            providerMessageId: sendResult && sendResult.data ? sendResult.data.id : null
+          });
+        }
+      } catch (providerError) {
+        if (emailOtpEnabled) {
+          return jsonError(
+            res,
+            502,
+            providerError && providerError.message
+              ? providerError.message
+              : "Email provider is unavailable right now."
+          );
+        }
+        console.warn("Resend provider unavailable, falling back to console OTP delivery:", providerError && providerError.message ? providerError.message : providerError);
       }
-
-      return res.json({
-        message: "Verification code sent.",
-        providerMessageId: sendResult && sendResult.data ? sendResult.data.id : null
-      });
     }
 
     console.log(`[DEV OTP] ${email} -> ${code}`);
@@ -1035,11 +1064,13 @@ app.post("/api/auth/register", authLimiter, async (req, res) => {
 
     const passwordHash = await bcrypt.hash(String(password), 12);
 
+    const emailVerified = requireEmailOtp ? 1 : 0;
+
     await run(
       `INSERT INTO users (
         account_type, first_name, last_name, reg_no, department,
-        program_or_unit, year_or_designation, email, username, password_hash, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        program_or_unit, year_or_designation, email, username, password_hash, email_verified, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         accountType,
         String(firstName).trim(),
@@ -1051,6 +1082,7 @@ app.post("/api/auth/register", authLimiter, async (req, res) => {
         normalizedEmail,
         normalizedUsername,
         passwordHash,
+        emailVerified,
         Date.now()
       ]
     );
@@ -1093,6 +1125,10 @@ app.post("/api/auth/signin", authLimiter, async (req, res) => {
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) {
       return jsonError(res, 401, "Invalid sign-in credentials.");
+    }
+
+    if (Number(user.email_verified) !== 1) {
+      return jsonError(res, 403, "Please verify your email before signing in.");
     }
 
     const token = jwt.sign(

@@ -67,85 +67,8 @@ function StatCard({ label, value, tone = "blue" }) {
   );
 }
 
-function LoginPage({ onLogin, isLoading, error }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [localError, setLocalError] = useState("");
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    setLocalError("");
-
-    if (!email.trim()) {
-      setLocalError("Email is required");
-      return;
-    }
-
-    if (!password.trim()) {
-      setLocalError("Password is required");
-      return;
-    }
-
-    onLogin(email, password);
-  }
-
-  return (
-    <div className="flex h-screen items-center justify-center bg-[radial-gradient(circle_at_top_left,#f4fbff_0%,#eaf5ff_45%,#e7f4f2_100%)] p-4">
-      <div className="w-full max-w-md rounded-2xl border border-[#c9dbea] bg-white p-8 shadow-[0_20px_48px_rgba(17,42,61,0.12)]">
-        <div className="mb-8 text-center">
-          <h1 className="font-display text-3xl font-bold text-[#132b3f]">Admin Portal</h1>
-          <p className="mt-2 text-sm text-[#52677f]">Secure administrator access</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-[#2a4057] mb-2">Email Address</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@campusconnect.com"
-              className="w-full rounded-xl border border-[#d2dfeb] bg-white px-4 py-3 text-[#1a2a3d] outline-none transition focus:border-[#0ea596] focus:ring-2 focus:ring-[#0ea59630]"
-              disabled={isLoading}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-[#2a4057] mb-2">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              className="w-full rounded-xl border border-[#d2dfeb] bg-white px-4 py-3 text-[#1a2a3d] outline-none transition focus:border-[#0ea596] focus:ring-2 focus:ring-[#0ea59630]"
-              disabled={isLoading}
-            />
-          </div>
-
-          {(error || localError) && (
-            <div className="rounded-lg bg-[#fdeef1] p-3 text-sm font-medium text-[#c53c58]">
-              {error || localError}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full rounded-xl bg-[linear-gradient(135deg,#169f91,#36cfc0)] py-3 text-sm font-semibold text-white shadow-[0_8px_16px_rgba(22,159,145,0.2)] transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {isLoading ? "Logging in..." : "Login"}
-          </button>
-        </form>
-
-        <p className="mt-6 text-center text-xs text-[#52677f]">
-          Unauthorized access attempts are logged and monitored.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function AdminPortalPage({ token, onLogout }) {
+function AdminPortalPage() {
+  const [adminKey, setAdminKey] = useState(() => localStorage.getItem(ADMIN_KEY_STORAGE) || "");
   const [users, setUsers] = useState([]);
   const [health, setHealth] = useState({ ok: false, service: "Unknown" });
   const [eventCount, setEventCount] = useState(0);
@@ -158,6 +81,25 @@ function AdminPortalPage({ token, onLogout }) {
   const [approvingEventId, setApprovingEventId] = useState(null);
   const [error, setError] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const devAdminParam = url.searchParams.get("devAdmin");
+
+    if (devAdminParam === "1") {
+      localStorage.setItem("CC_SHOW_DEV_ADMIN", "true");
+      setHasDeveloperAccess(true);
+      return;
+    }
+
+    if (devAdminParam === "0") {
+      localStorage.removeItem("CC_SHOW_DEV_ADMIN");
+      setHasDeveloperAccess(false);
+      return;
+    }
+
+    setHasDeveloperAccess(localStorage.getItem("CC_SHOW_DEV_ADMIN") === "true");
+  }, []);
 
   async function fetchAdminData() {
     try {
@@ -288,6 +230,24 @@ function AdminPortalPage({ token, onLogout }) {
     if (!users.length) return null;
     return [...users].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0];
   }, [users]);
+
+  if (!hasDeveloperAccess) {
+    return (
+      <div className="min-h-screen p-3 md:p-6">
+        <div className="mx-auto max-w-[760px] rounded-[2rem] border border-[#c9dbea] bg-[linear-gradient(180deg,#ffffff,#f4f9ff)] p-8 text-center shadow-[0_20px_48px_rgba(17,42,61,0.12)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#9b3b50]">Restricted</p>
+          <h1 className="mt-2 font-display text-3xl font-bold text-[#132b3f]">Developer Admin Hidden</h1>
+          <p className="mt-3 text-[#52677f]">This page is available only for internal developer access.</p>
+          <a
+            href="index.html"
+            className="mt-6 inline-flex rounded-xl border border-[#c9d8e7] bg-white px-5 py-2.5 text-sm font-semibold text-[#1f3149] transition hover:border-[#0ea59699] hover:text-[#0e8f84]"
+          >
+            Back to Home
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen p-3 md:p-6">
